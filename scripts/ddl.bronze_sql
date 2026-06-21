@@ -1,0 +1,208 @@
+--Creating stored procedures for this script so they can be reused everyday to reload new data into the tables. 
+CREATE OR ALTER PROCEDURE Bronze.Load_Data AS
+--Creating Tables for bronze layer from source data
+--CRM Source system tables
+BEGIN 
+    --To get the time of load of each layer to track the data load and identify which table is taking the longest to load
+    DECLARE @StartTime DATETIME, @EndTime DATETIME, @Start_Batch_Time DATETIME, @End_Batch_Time DATETIME;
+    BEGIN TRY
+        SET @Start_Batch_Time = GETDATE();
+        PRINT '===================================';
+        PRINT 'Starting data load into bronze layer tables' ;
+        PRINT '===================================';
+
+        PRINT '-----------------------------------';
+        PRINT 'Creating tables for CRM source system' ;
+        PRINT '-----------------------------------';
+
+        PRINT 'TRUNCATING TABLE Bronze.crm_cust_info';
+    
+        IF OBJECT_ID ('Bronze.crm_cust_info', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[crm_cust_info];
+        CREATE TABLE [Bronze].[crm_cust_info]
+        (
+            [cst_id] [int] NULL,
+            [cst_key] [nvarchar](50) NULL,
+            [cst_firstname] [nvarchar](50) NULL,
+            [cst_lastname] [nvarchar](50) NULL,
+            [cst_marital_status] [nvarchar](50) NULL,
+            [cst_gndr] [nvarchar](50) NULL,
+            [cst_create_date] [date] NULL
+        );
+
+        PRINT 'TRUNCATING TABLE Bronze.crm_prd_info';
+        IF OBJECT_ID ('Bronze.crm_prd_info', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[crm_prd_info];
+        CREATE TABLE [Bronze].[crm_prd_info](
+            [prd_id] [int] NULL,
+            [prd_key] [nvarchar](50) NULL,
+            [prd_nm] [nvarchar](50) NULL,
+            [prd_cost] [int] NULL,
+            [prd_line] [nvarchar](50) NULL,
+            [prd_start_dt] [date] NULL,
+            [prd_end_date] [date] NULL
+        ) 
+
+        PRINT 'TRUNCATING TABLE Bronze.crm_sales_details';
+        IF OBJECT_ID ('Bronze.crm_sales_details', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[crm_sales_details];
+        CREATE TABLE [Bronze].[crm_sales_details]
+        (   
+            sls_ord_num NVARCHAR(50),
+            sls_prd_key NVARCHAR(50),
+            sls_cust_id INT,
+            sls_order_dt INT,
+            sls_ship_dt INT,
+            sls_due_dt INT,
+            sls_sales INT,
+            sls_quantity INT,
+            sls_price INT
+        );
+        PRINT '-----------------------------------';
+        PRINT 'Creating tables for ERP source system' ;
+        PRINT '-----------------------------------';
+
+        --ERP Source system tables
+        PRINT 'TRUNCATING TABLE Bronze.erp_CUST_AZ12';
+        IF OBJECT_ID ('Bronze.erp_CUST_AZ12', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[erp_CUST_AZ12];
+        CREATE TABLE [Bronze].[erp_CUST_AZ12]
+        (
+            cid NVARCHAR(50),
+            bdate DATE,
+            gen NVARCHAR(10),
+        );
+
+        PRINT 'TRUNCATING TABLE Bronze.erp_cust_info';
+        IF OBJECT_ID ('Bronze.erp_cust_info', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[erp_cust_info];
+        CREATE TABLE [Bronze].[erp_cust_info]
+        (
+            cid NVARCHAR(50),
+            bdate DATE,
+            gen NVARCHAR(50)
+        );
+
+        PRINT 'TRUNCATING TABLE Bronze.erp_LOC_A101';
+        IF OBJECT_ID ('Bronze.erp_LOC_A101', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[erp_LOC_A101];
+        CREATE TABLE [Bronze].[erp_LOC_A101]
+        (
+            cid NVARCHAR(50),
+            cntry NVARCHAR(50)
+        );
+
+        PRINT 'TRUNCATING TABLE Bronze.erp_PX_CAT_G1V2';
+        IF OBJECT_ID ('Bronze.erp_PX_CAT_G1V2', 'U') IS NOT NULL
+            DROP TABLE [Bronze].[erp_PX_CAT_G1V2];
+        CREATE TABLE [Bronze].[erp_PX_CAT_G1V2]
+        (
+            id NVARCHAR(50),
+            cat NVARCHAR(50),
+            subcat NVARCHAR(50),
+            maintenance NVARCHAR(50)
+        );
+
+        --Loading data into bronze layer tables using full load and Bulk Insert
+        --First Delete everything from the table so we are not appending data to the existing table.
+        SET @StartTime = GETDATE();
+        TRUNCATE TABLE Bronze.crm_cust_info;
+        BULK INSERT Bronze.crm_cust_info
+        FROM '/var/opt/mssql/cust_info.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ',',
+            TABLOCK
+        )
+        SET @EndTime = GETDATE();
+        PRINT 'Time taken to load data into Bronze.crm_cust_info: '
+        + CAST(DATEDIFF(SECOND, @StartTime, @EndTime) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+        
+        SET @StartTime = GETDATE();
+        TRUNCATE TABLE Bronze.crm_prd_info;
+        BULK INSERT Bronze.crm_prd_info
+        FROM '/var/opt/mssql/prd_info.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ',',
+            TABLOCK
+        )
+        SET @EndTime = GETDATE();
+        PRINT 'Time taken to load data into Bronze.crm_prd_info: '
+        + CAST(DATEDIFF(SECOND, @StartTime, @EndTime) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+
+        SELECT COUNT(*) FROM Bronze.crm_prd_info;
+
+        SET @StartTime = GETDATE();
+        TRUNCATE TABLE Bronze.crm_sales_details;
+        BULK INSERT Bronze.crm_sales_details
+        FROM '/var/opt/mssql/sales_details.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ',',
+            TABLOCK
+        )
+        SET @EndTime = GETDATE();
+        PRINT 'Time taken to load data into Bronze.crm_sales_details: '
+        + CAST(DATEDIFF(SECOND, @StartTime, @EndTime) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+        SELECT COUNT(*) FROM Bronze.crm_sales_details;
+
+        SET @StartTime = GETDATE();
+        TRUNCATE TABLE Bronze.erp_CUST_AZ12;
+        BULK INSERT Bronze.erp_CUST_AZ12
+        FROM '/var/opt/mssql/cust_az12.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ',',
+            TABLOCK
+        )
+        SELECT COUNT(*) FROM Bronze.erp_CUST_AZ12;
+        SET @EndTime = GETDATE();
+        PRINT 'Time taken to load data into Bronze.erp_CUST_AZ12: '
+        + CAST(DATEDIFF(SECOND, @StartTime, @EndTime) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+
+        SET @StartTime = GETDATE();
+        TRUNCATE TABLE Bronze.erp_LOC_A101;
+        BULK INSERT Bronze.erp_LOC_A101
+        FROM '/var/opt/mssql/loc_a101.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ',',
+            TABLOCK
+        )
+        SET @EndTime = GETDATE();
+        PRINT 'Time taken to load data into Bronze.erp_LOC_A101: '
+        + CAST(DATEDIFF(SECOND, @StartTime, @EndTime) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+        SELECT COUNT(*) FROM Bronze.erp_LOC_A101;
+
+        SET @StartTime = GETDATE();
+        TRUNCATE TABLE Bronze.erp_PX_CAT_G1V2;
+        BULK INSERT [Bronze].[erp_PX_CAT_G1V2]
+        FROM '/var/opt/mssql/PX_CAT_G1V2.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ',',
+            TABLOCK
+        )
+        SET @EndTime = GETDATE();
+        PRINT 'Time taken to load data into Bronze.erp_PX_CAT_G1V2: '
+        + CAST(DATEDIFF(SECOND, @StartTime, @EndTime) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+        SELECT COUNT(*) FROM Bronze.erp_PX_CAT_G1V2;   
+        SET @End_Batch_Time = GETDATE();
+        PRINT 'Total time taken for the entire batch: '
+        + CAST(DATEDIFF(SECOND, @Start_Batch_Time, @End_Batch_Time) AS NVARCHAR(10)) + ' seconds';
+        PRINT '-----------------------------------';
+    END TRY
+    BEGIN CATCH
+        PRINT '===================================';
+        PRINT 'ERROR OCCURRED DURING LOADING DATA' ;
+        PRINT 'Error Messsage:' + ERROR_MESSAGE();
+        PRINT '===================================';   
+    END CATCH
+END;
