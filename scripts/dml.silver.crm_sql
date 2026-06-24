@@ -1,5 +1,5 @@
-CRM_CUST_INFO 
-
+--CRM_CUST_INFO 
+---ALWAYS VERIFY WITH TABLES WITH 'DATA QUALITY CHECKS' SCRIPTS AFTER INSERTING TRANSFORMED DATA INTO SILVER TABLES---
 -- Find duplicate customer IDs in the bronze layer. 
 SELECT * FROM (SELECT 
 *,
@@ -37,6 +37,7 @@ INSERT INTO silver.crm_cust_info (
     cst_gndr,
     cst_create_date
 )
+-Transformation. 
 SELECT
 cst_id,
 cst_key,
@@ -67,7 +68,7 @@ WHERE flag_last = 1
 
 SELECT * FROM silver.crm_cust_info
 
-CRM_PRD_INFO 
+--CRM_PRD_INFO 
 
 --To check data quality. 
 INSERT INTO Silver.crm_prd_info (
@@ -81,13 +82,16 @@ INSERT INTO Silver.crm_prd_info (
     prd_end_dt,
     dwh_create_date
 )
-
+-Transformation
 SELECT 
 prd_id, 
+-Deriving new columns from existing data
 REPLACE (SUBSTRING(prd_key, 1, 5), '-', '_') AS cat_id,
 SUBSTRING (prd_key, 7, LEN(prd_key)) AS prd_key,
 prd_nm,
+-Replacing nulls
 ISNULL(prd_cost, 0) prd_cost,
+- Data Standardization
 CASE 
     WHEN UPPER(TRIM(prd_line)) = 'R' THEN 'Road'
     WHEN UPPER(TRIM(prd_line)) = 'S' THEN 'Other Sales'
@@ -95,6 +99,7 @@ CASE
     WHEN UPPER(TRIM(prd_line)) = 'T' THEN 'Touring'
     ELSE 'n/a'
 END AS prd_line,
+- Chaging data types+ extracting data from another column (Data enrichment) 
 CAST(prd_start_dt AS DATE) AS prd_start_dt,
 CAST(
     DATEADD(day, -1, LEAD(prd_start_dt) OVER (PARTITION BY prd_key ORDER BY prd_start_dt))
@@ -102,9 +107,73 @@ CAST(
 GETDATE() AS dwh_create_date
 FROM bronze.crm_prd_info
 
+--CRM_SALES_DETAILS
+
+INSERT INTO Silver.crm_sales_details (
+    sls_ord_num,
+    sls_prd_key,
+    sls_cust_id,
+    sls_order_dt,
+    sls_ship_dt,
+    sls_due_dt,
+    sls_sales,
+    sls_quantity,
+    sls_price
+)
 SELECT 
-*
-FROM Silver.crm_prd_info
+sls_ord_num,
+sls_prd_key,
+sls_cust_id,
+CASE WHEN sls_order_dt = 0 OR LEN(sls_order_dt) != 8 THEN NULL 
+    ELSE CAST(CAST(sls_order_dt AS VARCHAR) AS DATE) 
+END AS sls_order_dt,
+CASE WHEN sls_ship_dt = 0 OR LEN(sls_ship_dt) != 8 THEN NULL 
+    ELSE CAST(CAST(sls_ship_dt AS VARCHAR) AS DATE) 
+END AS sls_ship_dt,
+CASE WHEN sls_due_dt = 0 OR LEN(sls_due_dt) != 8 THEN NULL 
+    ELSE CAST(CAST(sls_due_dt AS VARCHAR) AS DATE) 
+END AS sls_due_dt,
+CASE WHEN sls_sales <= 0 OR sls_sales IS NULL OR sls_sales != sls_quantity * ABS(sls_price)
+    THEN sls_quantity * ABS(sls_price) 
+    ELSE sls_sales
+END AS sls_sales,
+CASE WHEN sls_quantity IS NULL OR sls_quantity <= 0 
+    THEN NULL
+    ELSE sls_quantity
+END AS sls_quantity,
+CASE WHEN sls_price IS NULL OR sls_price <= 0 
+    THEN sls_sales / NULLIF(ABS(sls_quantity), 0)
+    ELSE sls_price 
+END AS sls_price
+FROM Bronze.crm_sales_details
+
+
+-- To check for missing product keys and customer IDs to connect both tables. 
+WHERE sls_prd_key NOT IN (SELECT prd_key FROM Silver.crm_prd_info)
+-- Check for invalid dates and length of date
+SELECT 
+NULLIF (sls_order_dt, 0) AS sls_order_dt
+FROM Bronze.crm_sales_details
+WHERE sls_order_dt <= 0 OR LEN(sls_order_dt) != 8
+--Change sls_order_dt from integer to date, CAN ONLY convert to varchar then date, sql rule. 
+
+--To check sales, quantity and price
+--sales = quantity * price, cant be negative, zero or null
+SELECT 
+ABS(sls_sales) AS sls_sales,
+ABS(sls_quantity) AS sls_quantity,
+ABS(sls_sales) * ABS(sls_quantity) AS sls_price
+FROM Bronze.crm_sales_details
+WHERE ABS(sls_sales) != ABS(sls_quantity) * ABS(sls_price) 
+OR ABS(sls_sales) IS NULL OR ABS(sls_quantity) IS NULL OR ABS(sls_price) IS NULL 
+OR ABS(sls_order_dt) <= 0 OR ABS(sls_ship_dt) <= 0 OR ABS(sls_due_dt) <= 0
+
+SELECT
+COUNT(*) as flag
+FROM Bronze.crm_sales_details
+
+GROUP BY sls_ord_num
+HAVING COUNT(*) != 1
 
 
 
